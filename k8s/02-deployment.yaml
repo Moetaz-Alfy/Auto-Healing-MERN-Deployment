@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mern-api
+  namespace: mern-app
+  labels:
+    app: mern-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mern-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: mern-api
+    spec:
+      containers:
+        - name: mern-api
+          # Replace with your ECR repo URL + tag. Jenkins updates this on each deploy.
+          image: 814871720405.dkr.ecr.us-east-1.amazonaws.com/auto-healing-mern-api:v1
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: mongo-secret
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # Liveness: process-level check. If this fails repeatedly, k8s KILLS
+          # and RESTARTS the container - this is the core "self-healing" behavior.
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          # Readiness: is this pod ready for traffic (DB connected)? If this
+          # fails, the pod is pulled from the Service/ALB target group but NOT
+          # restarted - it gets a chance to recover on its own.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+      terminationGracePeriodSeconds: 30

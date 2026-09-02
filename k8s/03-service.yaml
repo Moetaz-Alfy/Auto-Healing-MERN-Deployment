@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mern-api-svc
+  namespace: mern-app
+spec:
+  type: ClusterIP
+  selector:
+    app: mern-api
+  ports:
+    - port: 80
+      targetPort: 3000

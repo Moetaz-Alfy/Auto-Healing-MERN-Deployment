@@ -1,0 +1,78 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION       = 'us-east-1'
+        ECR_REPO         = credentials('ecr-repo-url')       // e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/auto-healing-mern-api
+        CLUSTER_NAME     = 'auto-healing-mern'
+        IMAGE_TAG        = "${env.BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Install & Test') {
+            steps {
+                dir('app') {
+                    sh 'npm ci'
+                    sh 'npm test'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                dir('app') {
+                    sh "docker build -t ${ECR_REPO}:${IMAGE_TAG} -t ${ECR_REPO}:latest ."
+                }
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                sh """
+                    aws ecr get-login-password --region ${AWS_REGION} | \
+                    docker login --username AWS --password-stdin ${ECR_REPO}
+                    docker push ${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REPO}:latest
+                """
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                sh """
+                    aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
+                    kubectl set image deployment/mern-api mern-api=${ECR_REPO}:${IMAGE_TAG} -n mern-app
+                    kubectl rollout status deployment/mern-api -n mern-app --timeout=120s
+                """
+            }
+        }
+
+        stage('Smoke Test') {
+            steps {
+                script {
+                    def albHost = sh(
+                        script: "kubectl get ingress mern-api-ingress -n mern-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
+                        returnStdout: true
+                    ).trim()
+                    sh "curl -sf http://${albHost}/health || (echo 'Smoke test failed' && exit 1)"
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo 'Pipeline failed - rolling back to previous revision'
+            sh "kubectl rollout undo deployment/mern-api -n mern-app || true"
+        }
+        always {
+            sh 'docker system prune -f || true'
+        }
+    }
+}

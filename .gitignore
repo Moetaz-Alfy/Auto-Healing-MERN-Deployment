@@ -5,4 +5,5 @@ terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
 terraform/*.tfvars
 *.pem
-*.key
+*.key"**/token.txt" 
+"**/ecr_token.txt" 
